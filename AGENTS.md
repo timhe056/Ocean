@@ -27,6 +27,7 @@
   - `god_rays.gd` / `god_rays.gdshader`：水下体积光柱（圆柱广告牌 MultiMesh，强度由 main.gd 按水下×日照×清澈度驱动）
   - `rain.gd`：雨幕粒子（weather.precip 驱动）；`lightning.gd`：雷电（天空闪光 + 合成雷声）
 - 新脚本添加 `class_name` 后需同步注册到 `.godot/global_script_class_cache.cfg`（编辑器会自动做，手写脚本时手动补），否则无头运行报 "Identifier not declared"
+- C# 代码（`prototype/fft/`）：改完用 `dotnet build ocean.csproj` 重建（`--build-solutions` 会挂起，别用）；C# 全局类同样要在上面的缓存注册（language 为 `C#`）；`project.godot` 的 features 需含 `C#`
 - 无头退出时偶发 `AudioStreamGeneratorPlayback` 泄漏警告（引擎音频服务器清理竞态，已在 `_exit_tree` 里 stop+释放引用缓解）：良性，不影响运行
 - 截图测试脚本（`_shot_test.gd` 等）会弹出真实游戏窗口渲染，**运行期间不要关闭窗口或按键**，否则进程提前退出/状态被污染
 - `docs/PROGRESS.md`：开发进度与里程碑，完成改动后需同步更新

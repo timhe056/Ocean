@@ -7,6 +7,7 @@ extends Camera3D
 @export var boost_mul := 3.0
 @export var mouse_sens := 0.0028
 
+var terrain: Node3D # terrain.gd，防穿海床用（main.gd 注入）
 var yaw := 0.0
 var pitch := 0.0
 
@@ -66,3 +67,8 @@ func _process(delta: float) -> void:
 		move.y -= 1.0
 	var sp := speed * (boost_mul if Input.is_key_pressed(KEY_SHIFT) else 1.0)
 	global_position += move * sp * delta
+	# 防穿海床：贴地 0.5m 为止（软性钳制，非物理碰撞）
+	if terrain:
+		var floor_y: float = terrain.get_height(global_position.x, global_position.z) + 0.5
+		if global_position.y < floor_y:
+			global_position.y = floor_y

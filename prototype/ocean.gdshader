@@ -31,6 +31,8 @@ uniform vec2 boat_pos = vec2(0.0);
 uniform vec2 boat_dir = vec2(0.0, -1.0); // 船头朝向
 uniform float boat_speed = 0.0; // m/s
 uniform float precip = 0.0; // 降水强度 0..1（weather 注入）
+uniform float spray = 0.0; // 飞沫强度 0..1：8.5 级风以上浪峰被风撕成水雾（main.gd 注入）
+uniform float camera_underwater = 0.0; // 相机在水下才走背面透光渲染（否则浪尖背面会露青色）
 uniform float turbidity = 1.0; // 浑浊度：1 清澈，风浪/降水搅起泥沙时升高（main.gd 注入）
 uniform float refraction_strength = 0.06; // 折射扭曲强度
 // 屏幕空间折射：浅滩透出海底（屏幕色 + 深度衰减），深海/浑浊时退回纯水体色
@@ -110,8 +112,10 @@ void fragment() {
 	vec3 view_dir = normalize(to_point);
 	vec3 v = -view_dir;
 
-	// 水下看海面背面：深青暗色 + 朝太阳方向的透光亮斑（白沫/尾迹不适用）
-	if (!FRONT_FACING) {
+	// 水下看海面背面：深青暗色 + 朝太阳方向的透光亮斑（白沫/尾迹不适用）。
+	// 仅当相机真的在水下时才这么画——水上掠射角看大浪背面（浪尖轮廓）仍走正面着色，
+	// 否则浪尖会出现青色描边。
+	if (!FRONT_FACING && camera_underwater > 0.5) {
 		float sun_glow = pow(max(dot(view_dir, -sun_direction), 0.0), 3.0);
 		vec3 under = mix(vec3(0.10, 0.28, 0.32), vec3(0.60, 0.75, 0.70), sun_glow);
 		under += shallow_color * clamp(wave_height * 0.4, 0.0, 0.6); // 浪峰透光
@@ -124,17 +128,18 @@ void fragment() {
 		METALLIC = 0.0;
 		NORMAL = normalize((VIEW_MATRIX * vec4(-n, 0.0)).xyz);
 	} else {
+	vec3 fn = FRONT_FACING ? n : -n; // 水上看到的背面（浪尖远坡）翻转法线
 
 	// 雨滴涟漪：高频噪声扰动法线，雨越大海面越"毛"
 	if (precip > 0.01) {
 		float r1 = texture(foam_noise, grid_xz * 0.9 + vec2(time * 0.90, time * 0.71)).r;
 		float r2 = texture(foam_noise, grid_xz * 0.9 + vec2(0.37, 0.71) - vec2(time * 0.83, time * 0.94)).r;
-		n.xz += (vec2(r1, r2) - 0.5) * precip * 0.35;
-		n = normalize(n);
+		fn.xz += (vec2(r1, r2) - 0.5) * precip * 0.35;
+		fn = normalize(fn);
 	}
 
 	// 菲涅尔：掠射角反射天空
-	float ndv = max(dot(n, v), 0.0);
+	float ndv = max(dot(fn, v), 0.0);
 	float fresnel = 0.02 + 0.98 * pow(1.0 - ndv, 5.0);
 
 	// 水体颜色：波峰偏浅
@@ -174,7 +179,7 @@ void fragment() {
 	// 白沫：坡度判据为主（物理上白沫产生在波面过陡即将破碎处，与绝对浪高解耦，
 	// 各海况档位覆盖率自动合理：平静几乎无、中等浪峰偶现、风暴多但呈条状）；
 	// 浪高项只是让泡沫偏向浪峰的小修正。噪声纹理破碎 + 距离淡出。
-	float steep = 1.0 - n.y;
+	float steep = 1.0 - fn.y;
 	float n1 = texture(foam_noise, grid_xz * 0.045 + vec2(time * 0.020, time * 0.013)).r;
 	vec2 ruv = vec2(grid_xz.x * 0.6 - grid_xz.y * 0.8, grid_xz.x * 0.8 + grid_xz.y * 0.6) * 0.11;
 	float n2 = texture(foam_noise, ruv - vec2(time * 0.028, time * 0.017)).r;
@@ -182,6 +187,17 @@ void fragment() {
 	float breaker = steep + wave_height * 0.02 + (noise_v - 0.5) * 0.10 * detail_fade;
 	float foam = smoothstep(0.075, 0.15, breaker);
 	foam *= exp(-dist * 0.012); // 远处淡出白沫
+
+	// --- 飞沫（spindrift）：8.5 级以上大风把浪峰撕成水雾——
+	// 沿主风向拉伸的高速滚动条纹，只出现在高而陡的浪峰上 ---
+	if (spray > 0.01) {
+		vec2 wdir = normalize(wave_a[0].xy); // 主浪向
+		vec2 suv = vec2(dot(grid_xz, wdir), dot(grid_xz, vec2(-wdir.y, wdir.x)));
+		float sp = texture(foam_noise, suv * vec2(0.025, 0.18) + vec2(time * 0.30, time * 0.02)).r;
+		float crest = smoothstep(0.4, 1.4, wave_height) * smoothstep(0.05, 0.12, steep);
+		float sp_amt = smoothstep(0.45, 0.8, sp) * crest * spray * detail_fade;
+		foam = max(foam, sp_amt * 0.5);
+	}
 
 	// --- 船尾迹：船体接触白沫（低速也在，解决船海交接生硬）+ V 形尾流（随航速）---
 	vec2 rel = grid_xz - boat_pos;
@@ -211,6 +227,6 @@ void fragment() {
 	ROUGHNESS = mix(0.06, 0.55, foam) + precip * 0.08;
 	SPECULAR = 0.5;
 	METALLIC = 0.0;
-	NORMAL = normalize((VIEW_MATRIX * vec4(n, 0.0)).xyz);
+	NORMAL = normalize((VIEW_MATRIX * vec4(fn, 0.0)).xyz);
 	}
 }

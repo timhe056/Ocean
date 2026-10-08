@@ -49,6 +49,7 @@ func _ready() -> void:
 	terrain = preload("res://prototype/terrain.gd").new()
 	add_child(terrain)
 	terrain.setup(provider)
+	dive_cam.terrain = terrain
 	# 鱼群
 	fish = preload("res://prototype/fish_manager.gd").new()
 	add_child(fish)
@@ -180,6 +181,9 @@ func _process(delta: float) -> void:
 	$Ocean.mat.set_shader_parameter("precip", weather.precip)
 	# 浑浊度：风浪搅沙 + 暴雨冲刷，浅滩透视度随之下降
 	$Ocean.mat.set_shader_parameter("turbidity", 1.0 + intensity * 1.2 + weather.precip * 1.5)
+	# 飞沫：8.5 级风以上逐渐出现
+	$Ocean.mat.set_shader_parameter("spray", clampf((provider.get_wind_level() - 8.5) / 3.0, 0.0, 1.0))
+	$Ocean.mat.set_shader_parameter("camera_underwater", underwater)
 
 	# 水下过渡：活动相机低于波面 → 水下环境（雾变浓变青、环境光压暗）
 	var cam := get_viewport().get_camera_3d()
