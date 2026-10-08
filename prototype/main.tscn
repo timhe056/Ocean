@@ -1,0 +1,117 @@
+[gd_scene load_steps=14 format=3]
+
+[ext_resource type="Script" path="res://prototype/main.gd" id="1"]
+[ext_resource type="Script" path="res://prototype/ocean.gd" id="2"]
+[ext_resource type="Script" path="res://prototype/boat.gd" id="3"]
+[ext_resource type="Script" path="res://prototype/camera_rig.gd" id="4"]
+
+[sub_resource type="PhysicalSkyMaterial" id="sky_mat"]
+
+[sub_resource type="Sky" id="sky"]
+sky_material = SubResource("sky_mat")
+
+[sub_resource type="Environment" id="env"]
+background_mode = 2
+sky = SubResource("sky")
+tonemap_mode = 3
+fog_enabled = true
+fog_density = 0.0018
+fog_sky_affect = 0.5
+glow_enabled = true
+glow_intensity = 0.3
+
+[sub_resource type="StandardMaterial3D" id="wood_mat"]
+albedo_color = Color(0.28, 0.18, 0.11, 1)
+roughness = 0.75
+
+[sub_resource type="StandardMaterial3D" id="white_mat"]
+albedo_color = Color(0.85, 0.85, 0.82, 1)
+roughness = 0.5
+
+[sub_resource type="BoxMesh" id="hull_mesh"]
+material = SubResource("wood_mat")
+size = Vector3(1.8, 0.9, 5)
+
+[sub_resource type="BoxMesh" id="cabin_mesh"]
+material = SubResource("white_mat")
+size = Vector3(1.3, 0.7, 1.8)
+
+[sub_resource type="CylinderMesh" id="mast_mesh"]
+material = SubResource("wood_mat")
+top_radius = 0.06
+bottom_radius = 0.08
+height = 3.0
+
+[sub_resource type="BoxShape3D" id="hull_shape"]
+size = Vector3(1.8, 0.9, 5)
+
+[node name="Main" type="Node3D"]
+script = ExtResource("1")
+
+[node name="WorldEnvironment" type="WorldEnvironment" parent="."]
+environment = SubResource("env")
+
+[node name="DirectionalLight3D" type="DirectionalLight3D" parent="."]
+rotation = Vector3(-0.9, -0.5, 0)
+light_energy = 1.2
+shadow_enabled = true
+directional_shadow_max_distance = 200.0
+
+[node name="Ocean" type="MeshInstance3D" parent="."]
+script = ExtResource("2")
+
+[node name="Boat" type="RigidBody3D" parent="."]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 2.5, 0)
+mass = 400.0
+script = ExtResource("3")
+
+[node name="Hull" type="MeshInstance3D" parent="Boat"]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0.2, 0)
+mesh = SubResource("hull_mesh")
+
+[node name="Cabin" type="MeshInstance3D" parent="Boat"]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 1.0, 0.9)
+mesh = SubResource("cabin_mesh")
+
+[node name="Mast" type="MeshInstance3D" parent="Boat"]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 2.0, -0.6)
+mesh = SubResource("mast_mesh")
+
+[node name="CollisionShape3D" type="CollisionShape3D" parent="Boat"]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0.2, 0)
+shape = SubResource("hull_shape")
+
+[node name="BuoyancyPoints" type="Node3D" parent="Boat"]
+
+[node name="BowL" type="Marker3D" parent="Boat/BuoyancyPoints"]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -0.6, -0.4, -2.2)
+
+[node name="BowR" type="Marker3D" parent="Boat/BuoyancyPoints"]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0.6, -0.4, -2.2)
+
+[node name="SternL" type="Marker3D" parent="Boat/BuoyancyPoints"]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -0.7, -0.4, 1.9)
+
+[node name="SternR" type="Marker3D" parent="Boat/BuoyancyPoints"]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0.7, -0.4, 1.9)
+
+[node name="CameraRig" type="Node3D" parent="."]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 3, 12)
+script = ExtResource("4")
+
+[node name="SpringArm3D" type="SpringArm3D" parent="CameraRig"]
+spring_length = 11.0
+
+[node name="Camera3D" type="Camera3D" parent="CameraRig/SpringArm3D"]
+current = true
+
+[node name="HUD" type="CanvasLayer" parent="."]
+
+[node name="Label" type="Label" parent="HUD"]
+offset_left = 16.0
+offset_top = 12.0
+theme_override_colors/font_color = Color(1, 1, 1, 1)
+theme_override_colors/font_shadow_color = Color(0, 0, 0, 0.8)
+theme_override_constants/shadow_offset_x = 1
+theme_override_constants/shadow_offset_y = 1
+text = "加载中..."

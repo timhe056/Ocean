@@ -1,0 +1,14 @@
+# Godot 4+ specific ignores
+.godot/
+/android/
+
+# 测试脚本生成的截图（可用 _shot_test/_cloud_test/_refraction_test 等随时重新生成）
+sea_*.png*
+w56_*.png*
+cloud_*.png*
+refr_*.png*
+lightning_*.png*
+dive_*.png*
+wake_*.png*
+rain_*.png*
+fog_*.png*
