@@ -10,7 +10,7 @@
 | M1 | 手感原型：海面 + 船只 + 相机 | ✅ 完成 | 2026-10-06，见下方详情；10-07 完成海面视觉修复 |
 | M2 | 天气系统：蒲福连续化 + 三轴事件编舞 | ✅ 完成 | 设计见 `design/04-weather-system-v2.md`；W1~W6 全部完成（10-08 完成 W5 涌浪预警+音效、W6 昼夜循环） |
 | M3 | 天空与大气：天气联动天空 | ✅ 完成 | 2026-10-07，见下方详情（fbm 云非体积云，体积云留待后续需要时升级） |
-| M4 | 海面升级：FFT 波浪（Tessendorf 光谱法） | 🔶 F1 完成 | 设计见 `design/05-fft-ocean.md`；F1：C# `FftOcean`（Phillips+JONSWAP 谱、128² IFFT 1.36ms、σ 校准对标 WIND_TABLE、确定性/平铺/演化验证全过）；F2 渲染接入待做 |
+| M4 | 海面升级：FFT 波浪（Tessendorf 光谱法） | 🔶 F1+F2 完成 | 设计见 `design/05-fft-ocean.md`；B 键切换后端；F3 choppiness/Jacobian 白沫、F4 涌浪双谱待做 |
 | M5 | 氛围打磨 | 🔶 部分 | 船尾迹+船体白沫 ✓、雨幕 ✓、闪电+合成雷声 ✓、飞沫 ✓、环境音 ✓ |
 | M6 | 真实天气模式（可选）：Open-Meteo 数据接入 | ⬜ 未开始 | |
 | M7 | 水下世界 v1：潜水相机 + 程序海床 + 观赏鱼群 | ✅ 完成 | 2026-10-07，见下方详情 |
@@ -87,6 +87,13 @@
 - **修复**：`fragment()` 不能用 `return`（Godot shader 限制）改为 if/else；海床 ArrayMesh 三角形绕序与法线（差分法线）
 
 **验证**：地形确定性/高度范围/生态区分布（`_terrain_test.gd`）✓；潜水五连拍（`_dive_test.gd`：仰视海面/平视/海床焦散/鱼群/水面回归）✓；无头 600 帧零报错 ✓
+
+## M4 详情（FFT 海面）
+
+- **F1 核心**（`prototype/fft/FftOcean.cs`，C#）：Phillips+JONSWAP 谱 → h̃(k,t) 演化 → 128×128 IFFT（1.36ms）；谱幅按 Gerstner σ 校准（手感一致）；固定 seed 确定性；验证 `_fft_test.gd`
+- **F2 渲染接入**：`WaveProvider` 新增后端切换（B 键，HUD 显示）——FFT 高度场每 2 帧上传为纹理（FORMAT_RF+mipmap），顶点位移/物理用 5×5 平滑场（防 5.9m 网格混叠，与 Gerstner 的 displace_count 同思想），fragment 法线用全分辨率场差分；白沫/SSS 用 lod1 平滑场（否则短波能量把坡度/浪高打满）；浮力物理改走 `SampleBilinear`（CPU/GPU 同一份数据）
+- **排掉的坑**：SampleBilinear 坐标换算错误（物理采样错位，船悬空）；盒式模糊回写覆盖全分辨率场（中间缓冲必须独立）；风浪渐变时谱重建阈值 0.25 级
+- **已知**：FFT 场远处法线被 mipmap 平均 → 远景比 Gerstner 更"镜面"（物理上合理，美感待试玩）；FFT 后端暂不支持涌浪通道（F4）；8 级浪谷会把浅水鱼群露出水面（depth_max 应随浪高调整）
 
 ## 当前已知问题 / 待办
 

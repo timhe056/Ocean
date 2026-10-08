@@ -111,12 +111,22 @@ func _unhandled_input(event: InputEvent) -> void:
 				weather.clear_event() # 恢复晴好
 			KEY_T:
 				day_night.toggle_time_scale() # 时间加速 ×30
+			KEY_B:
+				provider.toggle_backend() # Gerstner ↔ FFT（M4）
 			KEY_C:
 				_toggle_dive()
 			KEY_BRACKETLEFT:
 				day_night.hour = fmod(day_night.hour + 23.5, 24.0) # -0.5h
 			KEY_BRACKETRIGHT:
 				day_night.hour = fmod(day_night.hour + 0.5, 24.0) # +0.5h
+
+
+## 时刻显示：加速时标注倍率
+func _clock() -> String:
+	var s := day_night.clock_string()
+	if day_night.time_scale != 1.0:
+		s += " ×%d" % day_night.time_scale
+	return s
 
 
 func _toggle_dive() -> void:
@@ -179,6 +189,7 @@ func _process(delta: float) -> void:
 	$Ocean.set_sky_tint(Color(0.5, 0.68, 0.82).lerp(Color(0.38, 0.40, 0.44), gloom) * day_bright)
 	$Ocean.set_boat_state(boat.global_position, -boat.global_transform.basis.z, boat.linear_velocity.length())
 	$Ocean.mat.set_shader_parameter("precip", weather.precip)
+	provider.tick_visuals($Ocean.mat) # FFT 后端：演化高度场并上传纹理
 	# 浑浊度：风浪搅沙 + 暴雨冲刷，浅滩透视度随之下降
 	$Ocean.mat.set_shader_parameter("turbidity", 1.0 + intensity * 1.2 + weather.precip * 1.5)
 	# 飞沫：8.5 级风以上逐渐出现
@@ -213,7 +224,7 @@ func _process(delta: float) -> void:
 		hud_label.text = (
 			"潜水中 | 深度: %.1f m | 海床: %.0f m | 生态区: %s | 时刻: %s\nWASD 移动  Space/Ctrl 升降  Shift 加速  C 回船  Esc 释放鼠标"
 			% [depth, -terrain.get_height(cam_pos.x, cam_pos.z),
-				terrain.get_biome_name(cam_pos.x, cam_pos.z), day_night.clock_string()]
+				terrain.get_biome_name(cam_pos.x, cam_pos.z), _clock()]
 		)
 	else:
 		var speed_kn: float = boat.linear_velocity.length() * 1.944
@@ -221,8 +232,8 @@ func _process(delta: float) -> void:
 		var wind := provider.get_wind_level()
 		var mode := "自动" if weather.is_auto() else "手动"
 		hud_label.text = (
-			"速度: %.1f 节 | 油门: %d%% | 浪高: %+.1f m\n风力: %.1f 级（%.0f 节） | 事件: %s | 能见度: %.0f m | 天气: %s | 时刻: %s\nW/S 油门  A/D 舵  1/2/3 手动设风  [/] 调时间  C 潜水  鼠标环顾  Esc 释放鼠标"
+			"速度: %.1f 节 | 油门: %d%% | 浪高: %+.1f m\n风力: %.1f 级（%.0f 节） | 事件: %s | 能见度: %.0f m | 天气: %s | 时刻: %s | %s\nW/S 油门  A/D 舵  1/2/3 设风  4雨 5雷 6雾 7涌 0晴  T 时间加速  [/] 调时间  B 切FFT  C 潜水  Esc 鼠标"
 			% [speed_kn, roundi(boat.throttle * 100.0), wave_h,
 				wind, WaveProvider.beaufort_to_kn(wind), weather.event_label(),
-				weather.visibility_m(1.0 - day_f), mode, day_night.clock_string()]
+				weather.visibility_m(1.0 - day_f), mode, _clock(), "FFT" if provider.backend == "fft" else "Gerstner"]
 		)

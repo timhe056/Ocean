@@ -33,6 +33,10 @@ uniform float boat_speed = 0.0; // m/s
 uniform float precip = 0.0; // 降水强度 0..1（weather 注入）
 uniform float spray = 0.0; // 飞沫强度 0..1：8.5 级风以上浪峰被风撕成水雾（main.gd 注入）
 uniform float camera_underwater = 0.0; // 相机在水下才走背面透光渲染（否则浪尖背面会露青色）
+// M4 FFT 后端：高度场纹理（R 通道=浪高米，200m 域平铺），use_fft=1 时替代 Gerstner
+uniform int use_fft = 0;
+uniform sampler2D fft_height : filter_linear_mipmap, repeat_enable;
+uniform float fft_domain = 200.0;
 uniform float turbidity = 1.0; // 浑浊度：1 清澈，风浪/降水搅起泥沙时升高（main.gd 注入）
 uniform float refraction_strength = 0.06; // 折射扭曲强度
 // 屏幕空间折射：浅滩透出海底（屏幕色 + 深度衰减），深海/浑浊时退回纯水体色
@@ -44,6 +48,11 @@ varying vec2 grid_xz; // 位移前的网格坐标（用于逐像素精确求法�
 
 vec3 gerstner(vec2 xz, float t) {
 	vec3 disp = vec3(0.0);
+	if (use_fft == 1) {
+		// FFT 后端：顶点位移用 lod2（≈CPU 侧 5×5 平滑场，抑制 <6m 短波防混叠）
+		disp.y = textureLod(fft_height, xz / fft_domain, 2.0).r;
+		return disp;
+	}
 	for (int i = 0; i < displace_count; i++) {
 		vec2 d = wave_a[i].xy;
 		float k = wave_a[i].z;
@@ -73,6 +82,17 @@ void vertex() {
 // detail_fade：17m/9m 小波在远处缩到像素尺度会混叠成规则点阵，随距离淡出，
 // 只留 60m/31m 大涌（远处仍远大于像素，不会混叠）。
 vec3 wave_normal(vec2 xz, float t, float detail_fade) {
+	if (use_fft == 1) {
+		// 高度场差分法线（双线性过滤+mipmap，远距自动平滑，无混叠淡出需求）
+		float st = 1.0 / 128.0;
+		vec2 uv = xz / fft_domain;
+		float hL = texture(fft_height, uv - vec2(st, 0.0)).r;
+		float hR = texture(fft_height, uv + vec2(st, 0.0)).r;
+		float hD = texture(fft_height, uv - vec2(0.0, st)).r;
+		float hU = texture(fft_height, uv + vec2(0.0, st)).r;
+		float texel = fft_domain / 128.0;
+		return normalize(vec3(hL - hR, 2.0 * texel, hD - hU));
+	}
 	vec3 n = vec3(0.0, 1.0, 0.0);
 	for (int i = 0; i < 4; i++) {
 		vec2 d = wave_a[i].xy;
@@ -91,6 +111,10 @@ vec3 wave_normal(vec2 xz, float t, float detail_fade) {
 // 逐像素浪面高度（仅 y 分量，含全部 4 个波）。白沫/透光必须用它而不是
 // 顶点 varying——插值场在三角形边界梯度突变，阈值切割后会显出网格纹。
 float wave_height_at(vec2 xz, float t, float detail_fade) {
+	if (use_fft == 1) {
+		// 用 lod1 平滑场：全分辨率场含大量短波，直接把 SSS/波峰混色打成噪斑
+		return textureLod(fft_height, xz / fft_domain, 1.0).r;
+	}
 	float h = 0.0;
 	for (int i = 0; i < 4; i++) {
 		vec2 d = wave_a[i].xy;
@@ -179,12 +203,28 @@ void fragment() {
 	// 白沫：坡度判据为主（物理上白沫产生在波面过陡即将破碎处，与绝对浪高解耦，
 	// 各海况档位覆盖率自动合理：平静几乎无、中等浪峰偶现、风暴多但呈条状）；
 	// 浪高项只是让泡沫偏向浪峰的小修正。噪声纹理破碎 + 距离淡出。
-	float steep = 1.0 - fn.y;
+	// FFT 后端：白沫坡度用 lod1 平滑场法线（全分辨率法线的小波能量会把坡度打满）
+	float steep;
+	float foam_wh = wave_height; // 白沫用浪高（FFT 下取平滑场）
+	if (use_fft == 1) {
+		float st1 = 1.0 / 128.0;
+		vec2 uv1 = grid_xz / fft_domain;
+		float fL = textureLod(fft_height, uv1 - vec2(st1, 0.0), 1.0).r;
+		float fR = textureLod(fft_height, uv1 + vec2(st1, 0.0), 1.0).r;
+		float fD = textureLod(fft_height, uv1 - vec2(0.0, st1), 1.0).r;
+		float fU = textureLod(fft_height, uv1 + vec2(0.0, st1), 1.0).r;
+		float texel1 = fft_domain / 64.0;
+		vec3 nf = normalize(vec3(fL - fR, 2.0 * texel1, fD - fU));
+		steep = 1.0 - nf.y;
+		foam_wh = textureLod(fft_height, uv1, 1.0).r;
+	} else {
+		steep = 1.0 - fn.y;
+	}
 	float n1 = texture(foam_noise, grid_xz * 0.045 + vec2(time * 0.020, time * 0.013)).r;
 	vec2 ruv = vec2(grid_xz.x * 0.6 - grid_xz.y * 0.8, grid_xz.x * 0.8 + grid_xz.y * 0.6) * 0.11;
 	float n2 = texture(foam_noise, ruv - vec2(time * 0.028, time * 0.017)).r;
 	float noise_v = n1 * 0.65 + n2 * 0.35;
-	float breaker = steep + wave_height * 0.02 + (noise_v - 0.5) * 0.10 * detail_fade;
+	float breaker = steep + foam_wh * 0.02 + (noise_v - 0.5) * 0.10 * detail_fade;
 	float foam = smoothstep(0.075, 0.15, breaker);
 	foam *= exp(-dist * 0.012); // 远处淡出白沫
 

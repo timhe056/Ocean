@@ -64,9 +64,11 @@ func _init() -> void:
 
 	# 4) 双线性采样与网格值一致 + 平铺周期
 	var f2 := _make(6.0)
-	f2.Update(1.0)
-	var at_grid: float = f2.SampleBilinear(0.0, 0.0)
-	print("采样: 原点=%.3f 平铺 200m 后=%.3f" % [at_grid, f2.SampleBilinear(200.0, 0.0)])
+	var arr = f2.Update(1.0)
+	var texel := 200.0 / 128.0
+	var sampled: float = f2.SampleBilinear(texel * 3.0, texel * 5.0)
+	print("采样: 格点(3,5) 采样值=%.3f 高度场原值=%.3f（平滑场应接近）| 平铺 200m 后=%.3f"
+		% [sampled, arr[5 * 128 + 3], f2.SampleBilinear(200.0 + texel * 3.0, texel * 5.0)])
 
 	# 5) 性能：128² 单次 Update 耗时
 	var t0 := Time.get_ticks_usec()

@@ -18,7 +18,11 @@ public partial class FftOcean : RefCounted
 	double[] _h0r;    // 谱振幅实部（N×N，按 [nz*N+nx]）
 	double[] _h0i;
 	double[] _omega;  // 色散角频率
-	float[] _height;  // IFFT 输出高度场
+	float[] _height;  // IFFT 输出高度场（全分辨率，供法线/纹理）
+	float[] _smooth;  // 5×5 盒式模糊后的高度场（物理与顶点位移用，≈mip2）
+	float[] _blurTmp; // 模糊中间缓冲
+	double[] _workR;  // Update 工作缓冲（复用，避免每帧 GC）
+	double[] _workI;
 
 	/// <summary>网格分辨率</summary>
 	public int Size => _n;
@@ -38,6 +42,10 @@ public partial class FftOcean : RefCounted
 		_h0i = new double[n * n];
 		_omega = new double[n * n];
 		_height = new float[n * n];
+		_smooth = new float[n * n];
+		_blurTmp = new float[n * n];
+		_workR = new double[n * n];
+		_workI = new double[n * n];
 
 		var rng = new Random(seed);
 		double dk = 2.0 * Math.PI / domainSize;
@@ -103,8 +111,8 @@ public partial class FftOcean : RefCounted
 	public float[] Update(double t)
 	{
 		int n = _n;
-		var hr = new double[n * n];
-		var hi = new double[n * n];
+		var hr = _workR;
+		var hi = _workI;
 		// h̃(k,t) = h0(k)·e^{+iωt} + conj(h0(-k))·e^{-iωt}
 		for (int nz = 0; nz < n; nz++)
 		{
@@ -131,22 +139,46 @@ public partial class FftOcean : RefCounted
 			Fft1D(hr, hi, x, n, n, true);
 		for (int i = 0; i < n * n; i++)
 			_height[i] = (float)(hr[i] / (n * n));
+		BoxBlur2(_height, _blurTmp, _smooth, n);
 		return _height;
 	}
 
-	/// <summary>双线性插值采样高度（世界坐标米，周期平铺）。</summary>
+	/// <summary>5×5 可分离盒式模糊（环绕边界），抑制 <6m 短波（网格 5.9m/格会混叠）。</summary>
+	static void BoxBlur2(float[] src, float[] tmp, float[] dst, int n)
+	{
+		// 水平
+		for (int z = 0; z < n; z++)
+			for (int x = 0; x < n; x++)
+			{
+				float s = 0;
+				for (int d = -2; d <= 2; d++)
+					s += src[z * n + ((x + d + n) % n)];
+				tmp[z * n + x] = s * 0.2f;
+			}
+		// 垂直
+		for (int z = 0; z < n; z++)
+			for (int x = 0; x < n; x++)
+			{
+				float s = 0;
+				for (int d = -2; d <= 2; d++)
+					s += tmp[((z + d + n) % n) * n + x];
+				dst[z * n + x] = s * 0.2f;
+			}
+	}
+
+	/// <summary>双线性插值采样高度（世界坐标米，周期平铺）。采样平滑场（与顶点位移一致）。</summary>
 	public float SampleBilinear(float x, float z)
 	{
-		double fx = x / _domain * _n;
-		double fz = z / _domain * _n;
-		fx -= Math.Floor(fx);
-		fz -= Math.Floor(fz);
-		fx *= _n; fz *= _n;
+		double ux = x / _domain;
+		double uz = z / _domain;
+		ux -= Math.Floor(ux); // 平铺
+		uz -= Math.Floor(uz);
+		double fx = ux * _n, fz = uz * _n;
 		int x0 = (int)fx % _n, z0 = (int)fz % _n;
 		int x1 = (x0 + 1) % _n, z1 = (z0 + 1) % _n;
 		double tx = fx - Math.Floor(fx), tz = fz - Math.Floor(fz);
-		double h00 = _height[z0 * _n + x0], h10 = _height[z0 * _n + x1];
-		double h01 = _height[z1 * _n + x0], h11 = _height[z1 * _n + x1];
+		double h00 = _smooth[z0 * _n + x0], h10 = _smooth[z0 * _n + x1];
+		double h01 = _smooth[z1 * _n + x0], h11 = _smooth[z1 * _n + x1];
 		return (float)((h00 * (1 - tx) + h10 * tx) * (1 - tz) + (h01 * (1 - tx) + h11 * tx) * tz);
 	}
 

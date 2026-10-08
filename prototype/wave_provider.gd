@@ -167,7 +167,10 @@ static func beaufort_to_kn(b: float) -> float:
 
 ## 世界坐标 (x, z) 处在 t 时刻的浪面高度。t < 0 时使用当前时间。
 ## 必须与 ocean.gdshader 中 gerstner() 的 y 分量保持一致。
+## FFT 后端时改为高度场双线性插值（与 GPU 位移纹理同一份数据）。
 func get_height(x: float, z: float, t: float = -1.0) -> float:
+	if backend == "fft" and _fft != null:
+		return _fft.SampleBilinear(x, z)
 	if t < 0.0:
 		t = time
 	var h := 0.0
@@ -186,3 +189,63 @@ func get_shader_params() -> Dictionary:
 		wave_a.append(Vector4(w.dir.x, w.dir.y, w.k, w.omega))
 		wave_b.append(Vector4(w.amplitude, w.steepness, 0.0, 0.0))
 	return {"wave_a": wave_a, "wave_b": wave_b, "displace_count": displace_count}
+
+
+# ---------- M4：FFT 后端（Tessendorf 光谱法，设计见 docs/design/05-fft-ocean.md）----------
+
+const FFT_SIZE := 128
+const FFT_DOMAIN := 200.0 ## 覆盖域边长（米），周期平铺
+
+var backend := "gerstner" ## "gerstner" | "fft"（B 键切换）
+var _fft: RefCounted # FftOcean（C#）
+var _fft_img: Image
+var _fft_tex: ImageTexture
+var _fft_wind := -999.0
+var _fft_frame := 0
+
+
+## 切换海面后端。切到 FFT 时重建谱；切回 Gerstner 完全恢复原行为。
+func toggle_backend() -> String:
+	if backend == "gerstner":
+		backend = "fft"
+		_fft_wind = -999.0 # 强制下次 tick 重建谱
+	else:
+		backend = "gerstner"
+	return backend
+
+
+## 当前 Gerstner 混合波的总方差 σ（FFT 谱幅校准目标，保证两种后端手感一致）
+func gerstner_sigma() -> float:
+	var sum := 0.0
+	for w in _blended_waves():
+		sum += w.amplitude * w.amplitude / 2.0
+	return sqrt(sum)
+
+
+## 每帧驱动 FFT 后端（main.gd 调用）：谱随风级重建（变化 >0.25 级时），
+## 高度场每 2 帧演化一次（30Hz 足够），上传为位移纹理。
+func tick_visuals(mat: ShaderMaterial) -> void:
+	if backend != "fft":
+		if mat:
+			mat.set_shader_parameter("use_fft", 0)
+		return
+	if _fft == null:
+		_fft = FftOcean.new()
+	var w := get_wind_level()
+	if absf(w - _fft_wind) > 0.25 or _fft_tex == null:
+		_fft_wind = w
+		_fft.Setup(FFT_SIZE, FFT_DOMAIN, beaufort_to_kn(w) * 0.514, get_wind_dir(), 42, gerstner_sigma())
+		_fft_img = Image.create_empty(FFT_SIZE, FFT_SIZE, false, Image.FORMAT_RF)
+		_fft_img.generate_mipmaps()
+		_fft_tex = ImageTexture.create_from_image(_fft_img)
+		if mat:
+			mat.set_shader_parameter("fft_height", _fft_tex)
+			mat.set_shader_parameter("fft_domain", FFT_DOMAIN)
+			mat.set_shader_parameter("use_fft", 1)
+	_fft_frame += 1
+	if _fft_frame % 2 != 0:
+		return
+	var h = _fft.Update(time)
+	_fft_img.set_data(FFT_SIZE, FFT_SIZE, false, Image.FORMAT_RF, PackedFloat32Array(h).to_byte_array())
+	_fft_img.generate_mipmaps()
+	_fft_tex.update(_fft_img)
